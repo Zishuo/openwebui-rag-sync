@@ -1,6 +1,6 @@
 # OpenWebUI RAG Sync Pipeline
 
-**An automated document synchronization pipeline for OpenWebUI RAG (Retrieval-Augmented Generation). It handles recursive discovery, Git-based change tracking, and Markdown digest retrieval.**
+**An automated document synchronization pipeline for OpenWebUI RAG (Retrieval-Augmented Generation). It handles recursive discovery, Git-based change tracking, and Markdown export retrieval.**
 
 This project implements an automated pipeline for synchronizing documents with OpenWebUI's RAG system. It automates file discovery, change tracking via Git, and API-driven knowledge base updates.
 
@@ -35,28 +35,28 @@ The script is compositional. Providing a specific parameter "opts-in" to that ph
 | Combination | Command | Result |
 | :--- | :--- | :--- |
 | **Direct Upload** | `python3 sync.py -p ~/Docs --kb-name "MyKB"` | Uploads files directly from source to OpenWebUI. No local files created. |
-| **Direct Full Sync** | `python3 sync.py -p ~/Docs -d ./md --kb-name "MyKB"` | Uploads from source and downloads parsed Markdown to `./md`. |
+| **Direct Full Sync** | `python3 sync.py -p ~/Docs -e ./export --kb-name "MyKB"` | Uploads from source and downloads parsed Markdown to `./export`. |
 
 ### 3. Tracked Sync (Stateful / Git Enabled)
 | Combination | Command | Result |
 | :--- | :--- | :--- |
 | **Tracked Upload** | `python3 sync.py -p ~/Docs -s ./staged --kb-name "MyKB"` | Mirrors files to `./staged`. Only uploads new/modified files. |
-| **Full Tracked Sync** | `python3 sync.py -p ~/Docs -s ./staged -d ./md --kb-name "MyKB"` | Full pipeline: Discovery $\rightarrow$ Staging $\rightarrow$ Upload $\rightarrow$ Download. |
+| **Full Tracked Sync** | `python3 sync.py -p ~/Docs -s ./staged -e ./export --kb-name "MyKB"` | Full pipeline: Discovery $\rightarrow$ Staging $\rightarrow$ Upload $\rightarrow$ Export. |
 
 ### 4. Standalone Operations
 | Combination | Command | Result |
 | :--- | :--- | :--- |
 | **Upload Existing** | `python3 sync.py -s ./staged --kb-name "MyKB"` | Checks `./staged` for changes and uploads them. No new discovery. |
-| **Download KB** | `python3 sync.py -d ./md --kb-name "MyKB"` | Standalone download: Fetches all files from KB and saves to `./md`. |
+| **Download KB** | `python3 sync.py -e ./export --kb-name "MyKB"` | Standalone export: Fetches all files from KB and saves to `./export`. |
 
 ## ⚙️ Command Line Options
 
 - `-p`, `--path`: Source directory to scan. Triggers **Discovery**.
 - `-s`, `--staged-dir`: Directory to mirror raw files. Triggers **Stateful Tracking** (Git + Manifest).
-- `-d`, `--digest-dir`: Directory for Markdown digests. Triggers **Download**.
+- `-e`, `--export-dir`: Directory for Markdown exports. Triggers **Export**.
 - `--kb-name` / `--kb-id`: Target Knowledge Base. Required for any OpenWebUI interaction.
 - `--keyword`: Optional string to filter filenames during discovery.
-- `--digest-git`: Enable Git version control for the digest directory (default: off).
+- `--export-git`: Enable Git version control for the export directory (default: off).
 - `--insecure`: Skip SSL certificate verification (useful for self-signed certificates).
 
 ## 📜 Development Conventions

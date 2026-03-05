@@ -122,32 +122,49 @@ class OpenWebUIClient:
                     return kb.get("id")
         return None
 
+    def _ensure_kb_prefix(self, kb_id):
+        """Ensures the KB ID has the 'file-' prefix required by some endpoints."""
+        if kb_id and not kb_id.startswith("file-"):
+            return f"file-{kb_id}"
+        return kb_id
+
     def delete_kb(self, kb_id):
         """Deletes a knowledge base."""
-        url = f"{self.base_url}/api/v1/knowledge/{kb_id}/delete"
+        prefixed_id = self._ensure_kb_prefix(kb_id)
+        url = f"{self.base_url}/api/v1/knowledge/{prefixed_id}/delete"
         response = requests.delete(url, headers=self.headers, verify=self.verify)
         response.raise_for_status()
         return response.json()
 
     def add_to_kb(self, file_id, kb_id):
         """Links a file to a specific Knowledge Base."""
-        url = f"{self.base_url}/api/v1/knowledge/{kb_id}/file/add"
-        payload = {"file_id": file_id}
-        response = requests.post(url, headers=self.headers, json=payload, verify=self.verify)
-        
-        if response.status_code == 400 and "Duplicate content" in response.text:
-            return {"status": "duplicate", "message": "Content already exists in Knowledge Base."}
+        # Try both the original ID and the prefixed ID
+        ids_to_try = [kb_id]
+        if not kb_id.startswith("file-"):
+            ids_to_try.append(f"file-{kb_id}")
             
-        try:
-            response.raise_for_status()
-        except requests.exceptions.HTTPError as e:
-            print(f"Adding to KB failed: {response.status_code} - {response.text}")
-            raise e
-        return response.json()
+        last_error = None
+        for current_id in ids_to_try:
+            url = f"{self.base_url}/api/v1/knowledge/{current_id}/file/add"
+            payload = {"file_id": file_id}
+            response = requests.post(url, headers=self.headers, json=payload, verify=self.verify)
+            
+            if response.status_code == 200:
+                return response.json()
+            
+            if response.status_code == 400 and "Duplicate content" in response.text:
+                return {"status": "duplicate", "message": "Content already exists in Knowledge Base."}
+            
+            last_error = response
+            
+        # If all attempts failed, report the last error
+        print(f"Adding to KB failed: {last_error.status_code} - {last_error.text}")
+        last_error.raise_for_status()
 
     def get_kb_details(self, kb_id):
         """Returns details of a knowledge base including file list."""
-        url = f"{self.base_url}/api/v1/knowledge/{kb_id}"
+        prefixed_id = self._ensure_kb_prefix(kb_id)
+        url = f"{self.base_url}/api/v1/knowledge/{prefixed_id}"
         response = requests.get(url, headers=self.headers, verify=self.verify)
         response.raise_for_status()
         return response.json()

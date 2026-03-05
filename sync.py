@@ -17,7 +17,7 @@ def log(tag, message):
         "DISCOVERY": "\033[92m", # Green
         "VERSIONING": "\033[92m",# Green
         "UPLOAD": "\033[92m",    # Green
-        "DOWNLOAD": "\033[94m",  # Blue
+        "EXPORT": "\033[94m",    # Blue
         "CLEANUP": "\033[93m",   # Yellow
         "GIT": "\033[93m",       # Yellow
         "ERROR": "\033[91m",     # Red
@@ -34,10 +34,10 @@ def main():
     parser.add_argument("--path", "-p", help="Source directory to scan for documents (Discovery)")
     parser.add_argument("--keyword", help="Keyword to filter documents during discovery")
     parser.add_argument("--staged-dir", "-s", help="Tracking directory for raw documents (Upload)")
-    parser.add_argument("--digest-dir", "-d", help="Destination directory for Markdown digests (Download)")
+    parser.add_argument("--export-dir", "-e", help="Destination directory for Markdown exports (Export)")
     parser.add_argument("--kb-id", help="Knowledge Base ID")
     parser.add_argument("--kb-name", help="Knowledge Base Name")
-    parser.add_argument("--digest-git", action="store_true", help="Enable Git version control for the digest directory")
+    parser.add_argument("--export-git", action="store_true", help="Enable Git version control for the export directory")
     parser.add_argument("--insecure", action="store_true", help="Skip SSL certificate verification")
     
     args = parser.parse_args()
@@ -49,21 +49,21 @@ def main():
     if args.path:
         mode = "SYNC"
         staged_dir = args.staged_dir or "staged-docs"
-        digest_dir = args.digest_dir or "digest-docs"
-    elif args.staged_dir and args.digest_dir:
+        export_dir = args.export_dir or "export-docs"
+    elif args.staged_dir and args.export_dir:
         mode = "SYNC_STANDALONE"
         staged_dir = args.staged_dir
-        digest_dir = args.digest_dir
+        export_dir = args.export_dir
     elif args.staged_dir:
         mode = "UPLOAD"
         staged_dir = args.staged_dir
-        digest_dir = None
-    elif args.digest_dir:
-        mode = "DOWNLOAD"
+        export_dir = None
+    elif args.export_dir:
+        mode = "EXPORT"
         staged_dir = None
-        digest_dir = args.digest_dir
+        export_dir = args.export_dir
     else:
-        parser.error("Must provide either --path, --staged-dir, or --digest-dir to determine operation mode.")
+        parser.error("Must provide either --path, --staged-dir, or --export-dir to determine operation mode.")
 
     try:
         # 1. Validate configuration
@@ -92,14 +92,14 @@ def main():
 
         # Ensure directories exist
         staged_path = ensure_git_repo(staged_dir) if staged_dir else None
-        if digest_dir:
-            if args.digest_git:
-                digest_path = ensure_git_repo(digest_dir)
+        if export_dir:
+            if args.export_git:
+                export_path = ensure_git_repo(export_dir)
             else:
-                digest_path = pathlib.Path(digest_dir).expanduser().resolve()
-                digest_path.mkdir(exist_ok=True, parents=True)
+                export_path = pathlib.Path(export_dir).expanduser().resolve()
+                export_path.mkdir(exist_ok=True, parents=True)
         else:
-            digest_path = None
+            export_path = None
 
         # --- Phase 1: Discovery ---
         discovered_results = []
@@ -121,11 +121,11 @@ def main():
             if deleted_rel:
                 log("CLEANUP", f"Handling {len(deleted_rel)} deleted file(s)...")
                 for rel in deleted_rel:
-                    if digest_path:
-                        d_name = rel if rel.lower().endswith(".md") else f"{rel}.md"
-                        if (digest_path / d_name).exists():
-                            log("CLEANUP", f"Deleting local digest: {d_name}")
-                            (digest_path / d_name).unlink()
+                    if export_path:
+                        export_filename = rel if rel.lower().endswith(".md") else f"{rel}.md"
+                        if (export_path / export_filename).exists():
+                            log("CLEANUP", f"Deleting local export: {export_filename}")
+                            (export_path / export_filename).unlink()
                     subprocess.run(["git", "rm", rel], cwd=staged_path, check=True, capture_output=True)
 
             for rel in updated_rel:
@@ -217,42 +217,42 @@ def main():
                 if staged.stdout.strip():
                     subprocess.run(["git", "commit", "-m", f"feat: sync ({success_count} success, {len(failed_files)} failed)"], cwd=staged_path)
 
-        # --- Phase 3: Download ---
-        if digest_path:
+        # --- Phase 3: Export ---
+        if export_path:
             if not kb_id:
-                log("DOWNLOAD", "Skipping Download: No Knowledge Base provided.")
+                log("EXPORT", "Skipping Export: No Knowledge Base provided.")
             else:
-                download_list = []
+                export_list = []
                 if processed_files:
-                    log("DOWNLOAD", f"Downloading digests for {len(processed_files)} updated files...")
-                    download_list = processed_files
+                    log("EXPORT", f"Exporting {len(processed_files)} updated files...")
+                    export_list = processed_files
                 else:
-                    log("DOWNLOAD", f"Fetching all files from Knowledge Base {kb_id}...")
+                    log("EXPORT", f"Fetching all files from Knowledge Base {kb_id} for export...")
                     kb_files = client.get_kb_files(kb_id)
                     for f in kb_files:
                         meta = f.get("meta", {})
-                        download_list.append({"id": f.get("id"), "name": f.get("filename") or meta.get("name") or f"file_{f.get('id')}"})
-                    log("DOWNLOAD", f"Found {len(download_list)} files.")
+                        export_list.append({"id": f.get("id"), "name": f.get("filename") or meta.get("name") or f"file_{f.get('id')}"})
+                    log("EXPORT", f"Found {len(export_list)} files.")
 
-                download_count = 0
-                for item in download_list:
+                export_count = 0
+                for item in export_list:
                     try:
                         f_id, f_name = item["id"], item["name"]
-                        log("DOWNLOAD", f"Retrieving: {f_name}")
+                        log("EXPORT", f"Retrieving: {f_name}")
                         if processed_files: client.wait_for_processing(f_id)
                         content = client.get_content(f_id)
-                        d_name = f_name if f_name.lower().endswith(".md") else f"{f_name}.md"
-                        (digest_path / d_name).write_text(content)
-                        download_count += 1
+                        export_filename = f_name if f_name.lower().endswith(".md") else f"{f_name}.md"
+                        (export_path / export_filename).write_text(content)
+                        export_count += 1
                     except Exception as e:
-                        log("ERROR", f"Failed to download {item['name']}: {e}")
+                        log("ERROR", f"Failed to export {item['name']}: {e}")
 
-                log("DOWNLOAD", f"Retrieved {download_count} files.")
+                log("EXPORT", f"Exported {export_count} files.")
 
-                if args.digest_git and download_count > 0:
-                    log("GIT", "Committing changes to digest repository...")
-                    subprocess.run(["git", "add", "-A", "."], cwd=digest_path)
-                    subprocess.run(["git", "commit", "-m", f"feat: updated digests ({download_count} files)"], cwd=digest_path)
+                if args.export_git and export_count > 0:
+                    log("GIT", "Committing changes to export repository...")
+                    subprocess.run(["git", "add", "-A", "."], cwd=export_path)
+                    subprocess.run(["git", "commit", "-m", f"feat: updated exports ({export_count} files)"], cwd=export_path)
 
         log("FINISH", "Pipeline successfully completed.")
 
