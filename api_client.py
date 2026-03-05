@@ -152,8 +152,33 @@ class OpenWebUIClient:
         response.raise_for_status()
         return response.json()
 
-    def wait_for_processing(self, file_id, timeout=120, interval=5):
-        """Polls the file status until it's processed or times out."""
+    def wait_for_processing(self, file_id, timeout=120):
+        """Polls the file status using SSE streaming until it's processed or times out."""
+        url = f"{self.base_url}/api/v1/files/{file_id}/process/status?stream=true"
+        
+        try:
+            with requests.get(url, headers=self.headers, stream=True, verify=self.verify, timeout=timeout) as response:
+                response.raise_for_status()
+                for line in response.iter_lines():
+                    if line:
+                        line = line.decode('utf-8')
+                        if line.startswith('data: '):
+                            data = json.loads(line[6:])
+                            status = data.get('status')
+                            if status == 'completed':
+                                return True
+                            elif status == 'failed':
+                                error = data.get('error', 'Unknown error')
+                                raise RuntimeError(f"File processing failed: {error}")
+        except requests.exceptions.Timeout:
+            raise TimeoutError(f"File {file_id} processing timed out (SSE).")
+        except Exception as e:
+            # Fallback to polling if SSE fails or is not supported by the instance
+            print(f"Warning: SSE streaming failed ({e}). Falling back to polling...")
+            return self._wait_for_processing_poll(file_id, timeout)
+
+    def _wait_for_processing_poll(self, file_id, timeout=120, interval=5):
+        """Fallback polling mechanism for file status."""
         start_time = time.time()
         while time.time() - start_time < timeout:
             status_info = self.get_file_status(file_id)
@@ -164,4 +189,4 @@ class OpenWebUIClient:
                 error = status_info.get("error", "Unknown error")
                 raise RuntimeError(f"File processing failed: {error}")
             time.sleep(interval)
-        raise TimeoutError(f"File {file_id} processing timed out.")
+        raise TimeoutError(f"File {file_id} processing timed out (Polling).")
