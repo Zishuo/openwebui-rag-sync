@@ -1,6 +1,15 @@
 import pathlib
 import shutil
 import json
+import subprocess
+
+def get_repo_root(path):
+    """Finds the root of a git or svn repository."""
+    current = pathlib.Path(path).expanduser().resolve()
+    for parent in [current] + list(current.parents):
+        if (parent / ".git").exists() or (parent / ".svn").exists():
+            return parent
+    return None
 
 def discover_files(source_path, keyword=None, target_dir=None):
     """
@@ -10,6 +19,9 @@ def discover_files(source_path, keyword=None, target_dir=None):
     """
     source = pathlib.Path(source_path).expanduser().resolve()
     target = pathlib.Path(target_dir).expanduser().resolve() if target_dir else None
+    
+    # Identify Repo Root for enhanced flattening
+    repo_root = get_repo_root(source)
     
     manifest = {}
     if target:
@@ -30,8 +42,18 @@ def discover_files(source_path, keyword=None, target_dir=None):
         if path.is_file() and path.suffix.lower() in extensions:
             if not keyword or keyword.lower() in path.name.lower():
                 try:
-                    rel_path = path.resolve().relative_to(source)
-                    path_parts = [source.name] + list(rel_path.parts)
+                    abs_file_path = path.resolve()
+                    
+                    # Calculate flattened name based on repo context or source folder
+                    if repo_root and repo_root != abs_file_path:
+                        # Path relative to the root of the repository
+                        rel_path = abs_file_path.relative_to(repo_root)
+                        path_parts = list(rel_path.parts)
+                    else:
+                        # Fallback to current source folder logic
+                        rel_path = abs_file_path.relative_to(source)
+                        path_parts = [source.name] + list(rel_path.parts)
+                    
                     flattened_name = "_".join(path_parts)
                     
                     staged_path = None
@@ -41,10 +63,10 @@ def discover_files(source_path, keyword=None, target_dir=None):
                         # Update manifest entry
                         if flattened_name not in manifest or not isinstance(manifest[flattened_name], dict):
                             manifest[flattened_name] = {}
-                        manifest[flattened_name]["original_path"] = str(path.resolve())
+                        manifest[flattened_name]["original_path"] = str(abs_file_path)
                     
                     results.append({
-                        "original": path.resolve(),
+                        "original": abs_file_path,
                         "flattened": flattened_name,
                         "staged": staged_path
                     })

@@ -95,8 +95,31 @@ def test_discovery_deletion():
                 manifest = json.load(f)
             assert f"{source_dir_name}_to_delete.md" not in manifest
 
+def test_discovery_repo_aware():
+    with tempfile.TemporaryDirectory() as tmp_root:
+        root = pathlib.Path(tmp_root)
+        # 1. Create a git-like structure
+        (root / ".git").mkdir()
+        (root / "project" / "docs").mkdir(parents=True)
+        test_file = root / "project" / "docs" / "api.md"
+        test_file.touch()
+        test_file.write_text("content")
+        
+        # 2. Scan from a subpath
+        source = root / "project" / "docs"
+        
+        with tempfile.TemporaryDirectory() as tmp_target:
+            results = discover_files(str(source), target_dir=tmp_target)
+            
+            # 3. Verify naming
+            # Expected name: project_docs_api.md (relative to root)
+            found_names = {r['flattened'] for r in results}
+            assert "project_docs_api.md" in found_names
+            assert (pathlib.Path(tmp_target) / "project_docs_api.md").exists()
+
 if __name__ == "__main__":
     test_discovery()
     test_discovery_nested()
     test_discovery_deletion()
+    test_discovery_repo_aware()
     print("Discovery tests passed!")
