@@ -101,13 +101,13 @@ def main():
                 log("VERSIONING", f"Forcing upload for all files in {staged_path}...")
                 for path in staged_path.rglob('*'):
                     if path.is_file():
-                        rel = str(path.relative_to(staged_path))
-                        # Skip hidden files or files in hidden directories (like .git)
-                        if any(part.startswith('.') for part in pathlib.Path(rel).parts):
+                        rel_parts = list(path.relative_to(staged_path).parts)
+                        # Skip .git/ directory contents and sync tracking files
+                        if ".git" in rel_parts or ".svn" in rel_parts:
                             continue
-                        if path.name in ["sync_manifest.json", "sync_failures.log"]:
+                        if path.name in ["sync_manifest.json", "sync_failures.log", ".DS_Store"]:
                             continue
-                        upload_queue.append({"path": path, "flattened": path.name, "rel_path": rel, "context": staged_path})
+                        upload_queue.append({"path": path, "flattened": path.name, "rel_path": str(path.relative_to(staged_path)), "context": staged_path})
             else:
                 log("VERSIONING", f"Checking for changes in {staged_path}...")
                 updated_rel, deleted_rel = get_changed_files(staged_dir)

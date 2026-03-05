@@ -76,9 +76,11 @@ def discover_files(source_path, keyword=None, target_dir=None):
     # 1. Discovery
     for path in source.rglob('*'):
         if path.is_file() and path.suffix.lower() in extensions:
-            # Skip hidden files or files in hidden directories
-            rel_source_path = path.relative_to(source)
-            if any(part.startswith('.') for part in rel_source_path.parts):
+            # Skip hidden system directories (like .git, .svn)
+            rel_parts = list(path.relative_to(source).parts)
+            if ".git" in rel_parts or ".svn" in rel_parts:
+                continue
+            if path.name == ".DS_Store":
                 continue
                 
             if not keyword or keyword.lower() in path.name.lower():
