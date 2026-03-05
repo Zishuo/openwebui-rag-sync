@@ -112,10 +112,12 @@ def test_discovery_repo_aware():
             results = discover_files(str(source), target_dir=tmp_target)
             
             # 3. Verify naming
-            # Expected name: project_docs_api.md (relative to root)
+            # Expected name: <tmp_root_name>_project_docs_api.md
+            root_name = root.name
+            expected_name = f"{root_name}_project_docs_api.md"
             found_names = {r['flattened'] for r in results}
-            assert "project_docs_api.md" in found_names
-            assert (pathlib.Path(tmp_target) / "project_docs_api.md").exists()
+            assert expected_name in found_names
+            assert (pathlib.Path(tmp_target) / expected_name).exists()
 
 if __name__ == "__main__":
     test_discovery()

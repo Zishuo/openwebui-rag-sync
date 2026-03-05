@@ -45,10 +45,11 @@ def discover_files(source_path, keyword=None, target_dir=None):
                     abs_file_path = path.resolve()
                     
                     # Calculate flattened name based on repo context or source folder
-                    if repo_root and repo_root != abs_file_path:
+                    if repo_root:
                         # Path relative to the root of the repository
                         rel_path = abs_file_path.relative_to(repo_root)
-                        path_parts = list(rel_path.parts)
+                        # Include the repo root directory name itself
+                        path_parts = [repo_root.name] + list(rel_path.parts)
                     else:
                         # Fallback to current source folder logic
                         rel_path = abs_file_path.relative_to(source)
