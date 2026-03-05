@@ -49,7 +49,7 @@ def main():
     if args.path:
         mode = "SYNC"
         staged_dir = args.staged_dir or "staged-docs"
-        export_dir = args.export_dir or "export-docs"
+        export_dir = args.export_dir
     elif args.staged_dir and args.export_dir:
         mode = "SYNC_STANDALONE"
         staged_dir = args.staged_dir
