@@ -9,6 +9,11 @@ from discovery import discover_files
 from versioning import get_changed_files, ensure_git_repo
 from api_client import OpenWebUIClient
 
+def log(tag, message):
+    """Prints a formatted log message with timestamp and aligned tag."""
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    print(f"{timestamp} [{tag:<10}]: {message}")
+
 def main():
     parser = argparse.ArgumentParser(description="OpenWebUI RAG Sync Pipeline")
     parser.add_argument("--path", "-p", help="Source directory to scan for documents (Discovery)")
@@ -46,31 +51,32 @@ def main():
         parser.error("Must provide either --path, --staged-dir, or --digest-dir to determine operation mode.")
 
     try:
-        # 1. Validate configuration (Core API only)
+        # 1. Validate configuration
         Config.validate()
         client = OpenWebUIClient()
         
-        # 2. Resolve Knowledge Base ID (Only if KB info is provided)
+        log("CONFIG", f"Mode: {mode}")
+        
+        # 2. Resolve Knowledge Base ID
         kb_id = args.kb_id
         if not kb_id and args.kb_name:
-            print(f"Resolving Knowledge Base ID for name: '{args.kb_name}'...")
+            log("API", f"Resolving Knowledge Base ID for name: '{args.kb_name}'...")
             kb_id = client.get_kb_id_by_name(args.kb_name)
             if not kb_id:
                 if mode in ["SYNC", "UPLOAD"] or args.path:
-                    print(f"Knowledge Base '{args.kb_name}' not found. Creating it...")
+                    log("API", f"Knowledge Base '{args.kb_name}' not found. Creating it...")
                     kb_id = client.create_kb(args.kb_name, description=f"Sync collection")
-                    print(f"Created new Knowledge Base with ID: {kb_id}")
+                    log("API", f"Created new Knowledge Base with ID: {kb_id}")
                 else:
-                    print(f"Warning: Knowledge Base '{args.kb_name}' not found. OpenWebUI features will be skipped.")
+                    log("API", f"Warning: Knowledge Base '{args.kb_name}' not found. Skipping OpenWebUI phases.")
         
         if kb_id:
-            print(f"Using Knowledge Base ID: {kb_id}")
+            log("API", f"Using Knowledge Base ID: {kb_id}")
         else:
-            print("No Knowledge Base provided. Skipping OpenWebUI upload/download phases.")
+            log("API", "No Knowledge Base provided. Skipping upload/download phases.")
 
-        # Ensure directories exist and get absolute paths
+        # Ensure directories exist
         staged_path = ensure_git_repo(staged_dir) if staged_dir else None
-        
         if digest_dir:
             if args.digest_git:
                 digest_path = ensure_git_repo(digest_dir)
@@ -80,91 +86,75 @@ def main():
         else:
             digest_path = None
 
-        print(f"\n--- {mode} MODE ---")
-
         # --- Phase 1: Discovery ---
         discovered_results = []
         if args.path:
-            msg = f"\n--- DISCOVERY ---"
-            msg += f"\nScanning {args.path}"
-            if staged_dir:
-                msg += f" into {staged_dir}"
-            if args.keyword:
-                msg += f" with keyword '{args.keyword}'..."
-            else:
-                msg += "..."
-            print(msg)
+            log("DISCOVERY", f"Scanning {args.path}...")
             discovered_results = discover_files(args.path, args.keyword, target_dir=staged_dir)
-            print(f"Found {len(discovered_results)} document(s).")
+            log("DISCOVERY", f"Found {len(discovered_results)} document(s).")
 
-        # --- Phase 2: Upload (Requires kb_id) ---
+        # --- Phase 2: Upload ---
         processed_files = [] 
         success_count = 0
         failed_files = []
-        
         upload_queue = []
+        
         if staged_dir:
-            print(f"\n--- VERSIONING (Tracking Mode) ---")
-            print(f"Checking for changes in {staged_path}...")
+            log("VERSIONING", f"Checking for changes in {staged_path}...")
             updated_rel, deleted_rel = get_changed_files(staged_dir)
             
-            # Deletions
             if deleted_rel:
-                print(f"Handling {len(deleted_rel)} deleted file(s)...")
+                log("CLEANUP", f"Handling {len(deleted_rel)} deleted file(s)...")
                 for rel in deleted_rel:
                     if digest_path:
                         d_name = rel if rel.lower().endswith(".md") else f"{rel}.md"
                         if (digest_path / d_name).exists():
+                            log("CLEANUP", f"Deleting local digest: {d_name}")
                             (digest_path / d_name).unlink()
                     subprocess.run(["git", "rm", rel], cwd=staged_path, check=True, capture_output=True)
 
             for rel in updated_rel:
                 upload_queue.append({"path": staged_path / rel, "flattened": pathlib.Path(rel).name, "rel_path": rel, "context": staged_path})
         elif discovered_results:
-            print(f"\n--- UPLOAD PREP (Direct Mode) ---")
             for item in discovered_results:
                 upload_queue.append({"path": item["original"], "flattened": item["flattened"], "rel_path": None, "context": None})
 
         if upload_queue:
             if not kb_id:
-                print(f"Skipping Upload: No Knowledge Base ID or Name provided for {len(upload_queue)} file(s).")
+                log("UPLOAD", f"Skipping Upload: No Knowledge Base ID provided for {len(upload_queue)} files.")
             else:
-                print(f"\n--- UPLOAD ---")
-                print(f"Processing {len(upload_queue)} file(s)...")
+                log("UPLOAD", f"Processing {len(upload_queue)} file(s)...")
                 for item in upload_queue:
                     f_path, f_flattened = item["path"], item["flattened"]
                     try:
-                        # 1. Validate file content before upload
-                        if f_path.stat().st_size == 0:
-                            raise ValueError("File is empty (0 bytes).")
-                        
+                        # Validation
+                        if f_path.stat().st_size == 0: raise ValueError("File is empty.")
                         if f_path.suffix.lower() == '.md':
                             with open(f_path, 'r', errors='ignore') as f:
-                                if not f.read().strip():
-                                    raise ValueError("Markdown file is empty or contains only whitespace.")
+                                if not f.read().strip(): raise ValueError("Empty Markdown.")
 
                         if item["context"] and item["rel_path"]:
                             subprocess.run(["git", "add", item["rel_path"]], cwd=item["context"], check=True)
                         
-                        print(f"Uploading {f_flattened}...")
+                        log("UPLOAD", f"Uploading: {f_flattened}")
                         file_id = client.upload_file(str(f_path))
-                        print(f"Uploaded. File ID: {file_id}")
-
-                        print("Waiting for processing (embedding)...")
+                        
+                        log("UPLOAD", f"Waiting for processing: {file_id}")
                         client.wait_for_processing(file_id)
                         
-                        print(f"Linking to KB {kb_id}...")
+                        log("UPLOAD", f"Linking to KB...")
                         result = client.add_to_kb(file_id, kb_id)
                         
                         sync_status = "synced"
                         if isinstance(result, dict) and result.get("status") == "duplicate":
-                            print(f"Note: {result.get('message')}")
+                            log("UPLOAD", f"Soft Success: Content already exists.")
                         else:
-                            print("Successfully linked.")
+                            log("UPLOAD", "Successfully linked.")
                         
                         processed_files.append({"id": file_id, "name": f_flattened})
                         success_count += 1
                         
+                        # Manifest update
                         if item["context"]:
                             manifest_path = item["context"] / "sync_manifest.json"
                             if manifest_path.exists():
@@ -174,11 +164,11 @@ def main():
                                     with open(manifest_path, "w") as f: json.dump(manifest, f, indent=2)
                                     
                     except Exception as e:
-                        print(f"Error processing {f_flattened}: {e}")
+                        log("ERROR", f"Failed {f_flattened}: {e}")
                         failed_files.append(f_flattened)
                         if item["context"] and item["rel_path"]:
-                            log = item["context"] / "sync_failures.log"
-                            with open(log, "a") as f: f.write(f"[{datetime.datetime.now()}] FILE: {item['rel_path']} | ERROR: {e}\n")
+                            log_path = item["context"] / "sync_failures.log"
+                            with open(log_path, "a") as f: f.write(f"[{datetime.datetime.now()}] FILE: {item['rel_path']} | ERROR: {e}\n")
                             subprocess.run(["git", "rm", "--cached", item["rel_path"]], cwd=item["context"], capture_output=True)
                             manifest_path = item["context"] / "sync_manifest.json"
                             if manifest_path.exists():
@@ -187,56 +177,54 @@ def main():
                                     manifest[item["rel_path"]].update({"status": "failed", "last_sync": datetime.datetime.now().isoformat()})
                                     with open(manifest_path, "w") as f: json.dump(manifest, f, indent=2)
 
-            # Commit Tracking Repo
             if staged_path and (success_count > 0 or failed_files or (deleted_rel if 'deleted_rel' in locals() else False)):
-                print("\nCommitting changes to tracking repository...")
+                log("GIT", "Committing changes to tracking repository...")
                 subprocess.run(["git", "add", "sync_manifest.json", "sync_failures.log"], cwd=staged_path, capture_output=True)
                 staged = subprocess.run(["git", "diff", "--cached", "--name-only"], cwd=staged_path, capture_output=True, text=True)
                 if staged.stdout.strip():
-                    subprocess.run(["git", "commit", "-m", f"feat: sync documents ({success_count} success, {len(failed_files)} failed)"], cwd=staged_path)
+                    subprocess.run(["git", "commit", "-m", f"feat: sync ({success_count} success, {len(failed_files)} failed)"], cwd=staged_path)
 
-        # --- Phase 3: Download (Requires kb_id) ---
+        # --- Phase 3: Download ---
         if digest_path:
             if not kb_id:
-                print("\nSkipping Download: No Knowledge Base ID or Name provided.")
+                log("DOWNLOAD", "Skipping Download: No Knowledge Base provided.")
             else:
-                print(f"\n--- DOWNLOAD ---")
                 download_list = []
                 if processed_files:
-                    print(f"Downloading digests for {len(processed_files)} updated files...")
+                    log("DOWNLOAD", f"Downloading digests for {len(processed_files)} updated files...")
                     download_list = processed_files
                 else:
-                    print(f"Standalone mode: Fetching all files from Knowledge Base {kb_id}...")
+                    log("DOWNLOAD", f"Fetching all files from Knowledge Base {kb_id}...")
                     kb_files = client.get_kb_files(kb_id)
                     for f in kb_files:
                         meta = f.get("meta", {})
                         download_list.append({"id": f.get("id"), "name": f.get("filename") or meta.get("name") or f"file_{f.get('id')}"})
-                    print(f"Found {len(download_list)} files.")
+                    log("DOWNLOAD", f"Found {len(download_list)} files.")
 
                 download_count = 0
                 for item in download_list:
                     try:
                         f_id, f_name = item["id"], item["name"]
-                        print(f"Downloading: {f_name}...")
+                        log("DOWNLOAD", f"Retrieving: {f_name}")
                         if processed_files: client.wait_for_processing(f_id)
                         content = client.get_content(f_id)
                         d_name = f_name if f_name.lower().endswith(".md") else f"{f_name}.md"
                         (digest_path / d_name).write_text(content)
                         download_count += 1
                     except Exception as e:
-                        print(f"Failed to download {item['name']}: {e}")
+                        log("ERROR", f"Failed to download {item['name']}: {e}")
 
-                print(f"\nDownload complete. Successfully retrieved {download_count} files.")
+                log("DOWNLOAD", f"Retrieved {download_count} files.")
 
                 if args.digest_git and download_count > 0:
-                    print("Committing changes to digest repository...")
+                    log("GIT", "Committing changes to digest repository...")
                     subprocess.run(["git", "add", "-A", "."], cwd=digest_path)
                     subprocess.run(["git", "commit", "-m", f"feat: updated digests ({download_count} files)"], cwd=digest_path)
 
-        print("\nPipeline successfully completed.")
+        log("FINISH", "Pipeline successfully completed.")
 
     except Exception as e:
-        print(f"\nError: {e}")
+        log("FATAL", str(e))
         exit(1)
 
 if __name__ == "__main__":
