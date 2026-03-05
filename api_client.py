@@ -5,11 +5,6 @@ import json
 import datetime
 from config import Config
 
-# Suppress insecure request warnings if SSL verification is disabled
-import urllib3
-if not Config.VERIFY_SSL():
-    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-
 class OpenWebUIClient:
     def __init__(self):
         url = Config.BASE_URL().rstrip("/")

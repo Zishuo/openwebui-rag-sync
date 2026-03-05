@@ -1,5 +1,6 @@
 import os
 from dotenv import load_dotenv
+import urllib3
 
 load_dotenv()
 
@@ -16,7 +17,10 @@ class Config:
     def VERIFY_SSL(cls):
         # Default to True, allow "false" or "0" to disable
         val = os.getenv("OPENWEBUI_VERIFY_SSL", "true").lower()
-        return val not in ("false", "0")
+        should_verify = val not in ("false", "0")
+        if not should_verify:
+            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+        return should_verify
 
     @classmethod
     def validate(cls):
