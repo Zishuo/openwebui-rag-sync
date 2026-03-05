@@ -32,13 +32,18 @@ def test_discovery():
             assert (target / f"{source_dir_name}_notes.md").exists()
             assert (target / f"{source_dir_name}_meeting_notes.docx").exists()
             
-            # Verify manifest
+            # Verify manifest (New nested structure)
             manifest_path = target / "sync_manifest.json"
             assert manifest_path.exists()
             with open(manifest_path, "r") as f:
                 manifest = json.load(f)
-            assert f"{source_dir_name}_notes.md" in manifest
-            assert manifest[f"{source_dir_name}_notes.md"]["original_path"] == str((source / "notes.md").resolve())
+            
+            # Find the local repo key
+            repo_key = "local"
+            assert repo_key in manifest["repositories"]
+            repo_files = manifest["repositories"][repo_key]["files"]
+            assert f"{source_dir_name}_notes.md" in repo_files
+            assert repo_files[f"{source_dir_name}_notes.md"]["original_path"] == str((source / "notes.md").resolve())
 
 def test_discovery_nested():
     with tempfile.TemporaryDirectory() as tmp_source:
@@ -93,11 +98,12 @@ def test_discovery_deletion():
             # 4. Verify manifest cleanup
             with open(target / "sync_manifest.json", "r") as f:
                 manifest = json.load(f)
-            assert f"{source_dir_name}_to_delete.md" not in manifest
+            repo_files = manifest["repositories"]["local"]["files"]
+            assert f"{source_dir_name}_to_delete.md" not in repo_files
 
 def test_discovery_repo_aware():
     with tempfile.TemporaryDirectory() as tmp_root:
-        root = pathlib.Path(tmp_root)
+        root = pathlib.Path(tmp_root).resolve()
         # 1. Create a git-like structure
         (root / ".git").mkdir()
         (root / "project" / "docs").mkdir(parents=True)
@@ -118,6 +124,14 @@ def test_discovery_repo_aware():
             found_names = {r['flattened'] for r in results}
             assert expected_name in found_names
             assert (pathlib.Path(tmp_target) / expected_name).exists()
+            
+            # 4. Verify manifest remote (it should be None since we didn't add origin)
+            with open(pathlib.Path(tmp_target) / "sync_manifest.json", "r") as f:
+                manifest = json.load(f)
+            
+            # Use resolved string for key lookup
+            assert manifest["repositories"][str(root)]["type"] == "git"
+            assert manifest["repositories"][str(root)]["remote"] is None
 
 if __name__ == "__main__":
     test_discovery()

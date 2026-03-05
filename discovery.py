@@ -3,34 +3,69 @@ import shutil
 import json
 import subprocess
 
-def get_repo_root(path):
-    """Finds the root of a git or svn repository."""
+def get_repo_info(path):
+    """Finds the root, type, and remote URL of a git or svn repository."""
     current = pathlib.Path(path).expanduser().resolve()
     for parent in [current] + list(current.parents):
-        if (parent / ".git").exists() or (parent / ".svn").exists():
-            return parent
-    return None
+        if (parent / ".git").exists():
+            remote_url = None
+            try:
+                result = subprocess.run(
+                    ["git", "remote", "get-url", "origin"],
+                    cwd=parent, capture_output=True, text=True
+                )
+                if result.returncode == 0:
+                    remote_url = result.stdout.strip()
+            except Exception:
+                pass
+            return parent, "git", remote_url
+            
+        if (parent / ".svn").exists():
+            remote_url = None
+            try:
+                result = subprocess.run(
+                    ["svn", "info", "--show-item", "url"],
+                    cwd=parent, capture_output=True, text=True
+                )
+                if result.returncode == 0:
+                    remote_url = result.stdout.strip()
+            except Exception:
+                pass
+            return parent, "svn", remote_url
+            
+    return None, None, None
 
 def discover_files(source_path, keyword=None, target_dir=None):
     """
     Scans source_path for documents. 
-    If target_dir is provided, copies files there and updates sync_manifest.json.
-    Returns a list of dicts: {'original': Path, 'flattened': str, 'staged': Path or None}
+    Groups files by repository in sync_manifest.json.
     """
     source = pathlib.Path(source_path).expanduser().resolve()
     target = pathlib.Path(target_dir).expanduser().resolve() if target_dir else None
     
-    # Identify Repo Root for enhanced flattening
-    repo_root = get_repo_root(source)
+    repo_root, repo_type, repo_remote = get_repo_info(source)
     
-    manifest = {}
+    manifest = {"repositories": {}}
     if target:
         target.mkdir(exist_ok=True, parents=True)
         manifest_path = target / "sync_manifest.json"
         if manifest_path.exists():
             try:
                 with open(manifest_path, "r") as f:
-                    manifest = json.load(f)
+                    data = json.load(f)
+                    # Migration logic from flat to nested
+                    if "repositories" not in data:
+                        print("Migrating flat manifest to repository-grouped format...")
+                        for fname, entry in data.items():
+                            if isinstance(entry, dict) and "original_path" in entry:
+                                orig = pathlib.Path(entry["original_path"])
+                                r_root, r_type, r_remote = get_repo_info(orig)
+                                r_key = str(r_root) if r_root else "local"
+                                if r_key not in manifest["repositories"]:
+                                    manifest["repositories"][r_key] = {"type": r_type or "local", "remote": r_remote, "files": {}}
+                                manifest["repositories"][r_key]["files"][fname] = entry
+                    else:
+                        manifest = data
             except Exception as e:
                 print(f"Warning: Failed to load manifest: {e}")
 
@@ -44,16 +79,18 @@ def discover_files(source_path, keyword=None, target_dir=None):
                 try:
                     abs_file_path = path.resolve()
                     
-                    # Calculate flattened name based on repo context or source folder
                     if repo_root:
-                        # Path relative to the root of the repository
                         rel_path = abs_file_path.relative_to(repo_root)
-                        # Include the repo root directory name itself
                         path_parts = [repo_root.name] + list(rel_path.parts)
+                        repo_key = str(repo_root)
+                        current_repo_type = repo_type
+                        current_repo_remote = repo_remote
                     else:
-                        # Fallback to current source folder logic
                         rel_path = abs_file_path.relative_to(source)
                         path_parts = [source.name] + list(rel_path.parts)
+                        repo_key = "local"
+                        current_repo_type = "local"
+                        current_repo_remote = None
                     
                     flattened_name = "_".join(path_parts)
                     
@@ -61,10 +98,19 @@ def discover_files(source_path, keyword=None, target_dir=None):
                     if target:
                         staged_path = target / flattened_name
                         shutil.copy2(path, staged_path)
+                        
                         # Update manifest entry
-                        if flattened_name not in manifest or not isinstance(manifest[flattened_name], dict):
-                            manifest[flattened_name] = {}
-                        manifest[flattened_name]["original_path"] = str(abs_file_path)
+                        if repo_key not in manifest["repositories"]:
+                            manifest["repositories"][repo_key] = {"type": current_repo_type, "remote": current_repo_remote, "files": {}}
+                        
+                        # Update remote URL if it was missing or changed
+                        manifest["repositories"][repo_key]["remote"] = current_repo_remote
+                        
+                        repo_files = manifest["repositories"][repo_key]["files"]
+                        if flattened_name not in repo_files:
+                            repo_files[flattened_name] = {}
+                        
+                        repo_files[flattened_name]["original_path"] = str(abs_file_path)
                     
                     results.append({
                         "original": abs_file_path,
@@ -74,24 +120,25 @@ def discover_files(source_path, keyword=None, target_dir=None):
                 except ValueError:
                     continue
     
-    # 2. Deletion Check (only if staging)
+    # 2. Deletion Check
     if target:
-        to_delete = []
-        for flattened_name, entry in manifest.items():
-            original_path_str = entry["original_path"] if isinstance(entry, dict) else entry
-            original_path = pathlib.Path(original_path_str)
+        for r_path, r_data in manifest["repositories"].items():
+            to_delete = []
+            files = r_data.get("files", {})
+            for fname, entry in files.items():
+                orig_path = pathlib.Path(entry["original_path"])
+                # Only check deletions for files within the current scan path
+                if str(orig_path).startswith(str(source)):
+                    if not orig_path.exists():
+                        staged_file = target / fname
+                        if staged_file.exists():
+                            print(f"Source deleted: {orig_path}. Removing staged file: {fname}")
+                            staged_file.unlink()
+                        to_delete.append(fname)
             
-            if str(original_path).startswith(str(source)):
-                if not original_path.exists():
-                    staged_file = target / flattened_name
-                    if staged_file.exists():
-                        print(f"Source deleted: {original_path_str}. Removing staged file: {flattened_name}")
-                        staged_file.unlink()
-                    to_delete.append(flattened_name)
+            for key in to_delete:
+                del files[key]
         
-        for key in to_delete:
-            del manifest[key]
-            
         with open(target / "sync_manifest.json", "w") as f:
             json.dump(manifest, f, indent=2)
             

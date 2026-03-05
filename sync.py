@@ -139,8 +139,12 @@ def main():
                 log("UPLOAD", f"Skipping Upload: No Knowledge Base ID provided for {len(upload_queue)} files.")
             else:
                 log("UPLOAD", f"Processing {len(upload_queue)} file(s)...")
+                failure_log_path = staged_path / "sync_failures.log" if staged_path else None
+                manifest_path = staged_path / "sync_manifest.json" if staged_path else None
+
                 for item in upload_queue:
                     f_path, f_flattened = item["path"], item["flattened"]
+                    rel_file_path = item["rel_path"]
                     try:
                         # Validation
                         if f_path.stat().st_size == 0: raise ValueError("File is empty.")
@@ -148,8 +152,8 @@ def main():
                             with open(f_path, 'r', errors='ignore') as f:
                                 if not f.read().strip(): raise ValueError("Empty Markdown.")
 
-                        if item["context"] and item["rel_path"]:
-                            subprocess.run(["git", "add", item["rel_path"]], cwd=item["context"], check=True)
+                        if item["context"] and rel_file_path:
+                            subprocess.run(["git", "add", rel_file_path], cwd=item["context"], check=True)
                         
                         log("UPLOAD", f"Uploading: {f_flattened}")
                         file_id = client.upload_file(str(f_path))
@@ -170,26 +174,40 @@ def main():
                         success_count += 1
                         
                         # Manifest update
-                        if item["context"]:
-                            manifest_path = item["context"] / "sync_manifest.json"
-                            if manifest_path.exists():
-                                with open(manifest_path, "r") as f: manifest = json.load(f)
-                                if item["rel_path"] in manifest:
-                                    manifest[item["rel_path"]].update({"file_id": file_id, "status": sync_status, "last_sync": datetime.datetime.now().isoformat()})
-                                    with open(manifest_path, "w") as f: json.dump(manifest, f, indent=2)
+                        if manifest_path and manifest_path.exists() and rel_file_path:
+                            with open(manifest_path, "r") as f: manifest = json.load(f)
+                            updated_m = False
+                            if "repositories" in manifest:
+                                for r_data in manifest["repositories"].values():
+                                    if rel_file_path in r_data.get("files", {}):
+                                        r_data["files"][rel_file_path].update({
+                                            "file_id": file_id, "status": sync_status, "last_sync": datetime.datetime.now().isoformat()
+                                        })
+                                        updated_m = True
+                                        break
+                            if updated_m:
+                                with open(manifest_path, "w") as f: json.dump(manifest, f, indent=2)
                                     
                     except Exception as e:
                         log("ERROR", f"Failed {f_flattened}: {e}")
                         failed_files.append(f_flattened)
-                        if item["context"] and item["rel_path"]:
-                            log_path = item["context"] / "sync_failures.log"
-                            with open(log_path, "a") as f: f.write(f"[{datetime.datetime.now()}] FILE: {item['rel_path']} | ERROR: {e}\n")
-                            subprocess.run(["git", "rm", "--cached", item["rel_path"]], cwd=item["context"], capture_output=True)
-                            manifest_path = item["context"] / "sync_manifest.json"
-                            if manifest_path.exists():
+                        if item["context"] and rel_file_path:
+                            if failure_log_path:
+                                with open(failure_log_path, "a") as f:
+                                    f.write(f"[{datetime.datetime.now()}] FILE: {rel_file_path} | ERROR: {e}\n")
+                            subprocess.run(["git", "rm", "--cached", rel_file_path], cwd=item["context"], capture_output=True)
+                            if manifest_path and manifest_path.exists():
                                 with open(manifest_path, "r") as f: manifest = json.load(f)
-                                if item["rel_path"] in manifest:
-                                    manifest[item["rel_path"]].update({"status": "failed", "last_sync": datetime.datetime.now().isoformat()})
+                                updated_m = False
+                                if "repositories" in manifest:
+                                    for r_data in manifest["repositories"].values():
+                                        if rel_file_path in r_data.get("files", {}):
+                                            r_data["files"][rel_file_path].update({
+                                                "status": "failed", "last_sync": datetime.datetime.now().isoformat()
+                                            })
+                                            updated_m = True
+                                            break
+                                if updated_m:
                                     with open(manifest_path, "w") as f: json.dump(manifest, f, indent=2)
 
             if staged_path and (success_count > 0 or failed_files or (deleted_rel if 'deleted_rel' in locals() else False)):
