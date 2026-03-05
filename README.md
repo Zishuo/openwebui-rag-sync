@@ -4,92 +4,62 @@
 
 This project implements an automated pipeline for synchronizing documents with OpenWebUI's RAG system. It automates file discovery, change tracking via Git, and API-driven knowledge base updates.
 
-The pipeline's primary goal is to maintain a local mirror of processed document digests while ensuring only new or modified files are uploaded to OpenWebUI to minimize API overhead and redundancy.
-
 ## 🚀 Quick Start
 
-1.  **Clone the Repository:**
-    ```bash
-    git clone https://github.com/zishuo/openwebui-rag-sync.git
-    cd openwebui-rag-sync
-    ```
-
-2.  **Install Dependencies:**
+1.  **Install Dependencies:**
     ```bash
     pip install -r requirements.txt
     ```
 
-3.  **Configure Environment:**
-    Copy `.env.example` to `.env` and fill in your OpenWebUI API details:
-    ```bash
-    cp .env.example .env
-    ```
-    Edit `.env` and set:
-    - `OPENWEBUI_BASE_URL`: Your OpenWebUI instance URL (e.g., `https://chat.domain.com`).
-    - `OPENWEBUI_API_KEY`: Found in **Settings > Account** in OpenWebUI.
-
-4.  **Run a Sync:**
-    ```bash
-    python3 sync.py -p ~/MyDocuments -kb-name "MyKnowledgeBase"
-    ```
+2.  **Configure Environment:**
+    Copy `.env.example` to `.env` and fill in your OpenWebUI URL and API key.
 
 ## 🏗 Core Architecture
 
-- **Phase 1: Discovery:** Recursively scans a source path for documents (`.pdf`, `.md`, `.doc`, `.docx`). Filenames are flattened to prevent collisions (e.g., `source_subdir_file.md`).
-- **Phase 2: Upload:** Uses Git-based change detection in the tracking directory to identify new or modified files, uploads them to OpenWebUI, and links them to a Knowledge Base.
-- **Phase 3: Download:** Retrieves parsed Markdown digests from the OpenWebUI API.
+- **Discovery:** Recursively scans a source path. Filenames are flattened to prevent collisions.
+- **Tracking (Optional):** If `--staged-dir` is used, files are mirrored locally in a Git repository. `sync_manifest.json` tracks original paths to detect deletions in the source.
+- **RAG Sync (Optional):** If a Knowledge Base is provided, the script handles uploads, KB linking, and duplicate content detection.
+- **Persistence:** Commits successful syncs to the local tracking repository and logs failures to `sync_failures.log`.
 
-## ⚙️ Environment & Configuration
+## 🛠 Usage Combinations
 
-### Prerequisites
-- **Runtime:** Python 3.9+
-- **Version Control:** Git (installed and available in PATH).
-- **Dependencies:** `requests`, `python-dotenv`.
+The script is compositional. Providing a specific parameter "opts-in" to that phase of the pipeline.
 
-### Required Environment Variables
-- `OPENWEBUI_API_KEY`: Authentication key for the OpenWebUI instance.
-- `OPENWEBUI_BASE_URL`: Base URL of the OpenWebUI API.
+### 1. Discovery & Staging (Local Only)
+| Combination | Command | Result |
+| :--- | :--- | :--- |
+| **Discovery Only** | `python3 sync.py -p ~/Docs` | Scans source and reports found documents. No files moved. |
+| **Local Mirror** | `python3 sync.py -p ~/Docs -s ./staged` | Scans source, copies files to `./staged`, tracks changes via Git/Manifest. |
 
-## 🛠 Usage Guidelines
+### 2. Direct Sync (Stateless / No Local Mirror)
+| Combination | Command | Result |
+| :--- | :--- | :--- |
+| **Direct Upload** | `python3 sync.py -p ~/Docs --kb-name "MyKB"` | Uploads files directly from source to OpenWebUI. No local files created. |
+| **Direct Full Sync** | `python3 sync.py -p ~/Docs -d ./md --kb-name "MyKB"` | Uploads from source and downloads parsed Markdown to `./md`. |
 
-The script performs actions based on the provided parameters. You can combine them for a full sync or use them individually for specific tasks.
+### 3. Tracked Sync (Stateful / Git Enabled)
+| Combination | Command | Result |
+| :--- | :--- | :--- |
+| **Tracked Upload** | `python3 sync.py -p ~/Docs -s ./staged --kb-name "MyKB"` | Mirrors files to `./staged`. Only uploads new/modified files. |
+| **Full Tracked Sync** | `python3 sync.py -p ~/Docs -s ./staged -d ./md --kb-name "MyKB"` | Full pipeline: Discovery $\rightarrow$ Staging $\rightarrow$ Upload $\rightarrow$ Download. |
 
-### Command Line Options
-- `--path`, `-p`: (Optional) Source directory to scan. Triggers **Discovery** into the staging directory.
-- `--staged-dir`, `-s`: (Optional) Tracking directory for raw files. Triggers **Upload** of new/modified files.
-- `--digest-dir`, `-d`: (Optional) Destination for digests. Triggers **Download**.
-- `--keyword`: (Optional) Filter discovered files by name.
-- `--kb-id` / `--kb-name`: (Required) Target Knowledge Base identification.
-- `--digest-git`: (Optional) Enable Git version control for the digest directory (disabled by default).
+### 4. Standalone Operations
+| Combination | Command | Result |
+| :--- | :--- | :--- |
+| **Upload Existing** | `python3 sync.py -s ./staged --kb-name "MyKB"` | Checks `./staged` for changes and uploads them. No new discovery. |
+| **Download KB** | `python3 sync.py -d ./md --kb-name "MyKB"` | Standalone download: Fetches all files from KB and saves to `./md`. |
 
-### Example Scenarios
+## ⚙️ Command Line Options
 
-#### 1. Full Synchronization
-Scan a folder, upload changes, and download new digests.
-```bash
-python3 sync.py -p ~/Docs -s ~/staged -d ~/digests --kb-name "MyKB"
-```
-
-#### 2. Standalone Upload
-Upload and link any files currently sitting in your tracking directory.
-```bash
-python3 sync.py -s ~/staged --kb-name "MyKB"
-```
-
-#### 3. Standalone Download
-Download all parsed Markdown digests for an entire Knowledge Base.
-```bash
-python3 sync.py -d ~/digests --kb-name "MyKB"
-```
-
-#### 4. Automatic Discovery (Default Paths)
-If you omit directories, the script uses `staged-docs/` and `digest-docs/` by default.
-```bash
-python3 sync.py -p ~/Documents --kb-name "MyKB"
-```
+- `-p`, `--path`: Source directory to scan. Triggers **Discovery**.
+- `-s`, `--staged-dir`: Directory to mirror raw files. Triggers **Stateful Tracking** (Git + Manifest).
+- `-d`, `--digest-dir`: Directory for Markdown digests. Triggers **Download**.
+- `--kb-name` / `--kb-id`: Target Knowledge Base. Required for any OpenWebUI interaction.
+- `--keyword`: Optional string to filter filenames during discovery.
+- `--digest-git`: Enable Git version control for the digest directory (default: off).
 
 ## 📜 Development Conventions
-- **Compositional Logic:** Actions (Discover, Upload, Download) are independent and triggered by their respective CLI arguments.
-- **Flattened Paths:** Files are staged using underscores to join path segments, preventing name collisions across multiple source directories.
-- **Duplicate Detection:** Identical content is recognized as a "Soft Success" to prevent infinite retries.
-- **Error Logging:** Failures are recorded in `sync_failures.log` and committed to history.
+- **Flattened Paths:** Files are staged using underscores (e.g., `src_subdir_file.md`) to prevent collisions.
+- **Deletion Tracking:** Source deletions are detected via manifest and mirrored in tracking repos.
+- **Soft Success:** Content duplicates are recorded in Git/Manifest but skip redundant API processing.
+- **Error Logging:** Failures are recorded in `sync_failures.log` within the staging directory.

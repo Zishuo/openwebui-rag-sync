@@ -19,22 +19,37 @@ def get_changed_files(target_dir="staged-docs"):
     # Stage all changes temporarily to identify them
     subprocess.run(["git", "add", "-A", "."], cwd=target_path, check=True)
     
-    # Get list of staged files (new, modified, renamed)
+    # Get list of staged files using porcelain for easier parsing of status
     result = subprocess.run(
-        ["git", "diff", "--cached", "--name-only"],
+        ["git", "status", "--porcelain"],
         cwd=target_path, capture_output=True, text=True, check=True
     )
-    files = [line for line in result.stdout.splitlines() if line.strip()]
+    
+    updated = []
+    deleted = []
+    
+    for line in result.stdout.splitlines():
+        if not line.strip():
+            continue
+        
+        status = line[:2]
+        file_path = line[3:].strip().strip('"') # Strip quotes if they exist
+        
+        # Explicitly ignore manifest
+        if file_path == "sync_manifest.json":
+            continue
+            
+        if status.startswith('D') or status.endswith('D'):
+            deleted.append(file_path)
+        else:
+            updated.append(file_path)
     
     # Immediately unstage everything so we can stage them one-by-one in the orchestrator
-    if files:
+    if updated or deleted:
         try:
-            # Check if HEAD exists to determine the correct unstage command
             subprocess.run(["git", "rev-parse", "HEAD"], cwd=target_path, check=True, capture_output=True)
             subprocess.run(["git", "reset"], cwd=target_path, check=True, capture_output=True)
         except subprocess.CalledProcessError:
-            # No HEAD yet (new repo), use rm --cached
             subprocess.run(["git", "rm", "-r", "--cached", "."], cwd=target_path, check=True, capture_output=True)
     
-    # Return relative paths (as strings)
-    return files
+    return updated, deleted

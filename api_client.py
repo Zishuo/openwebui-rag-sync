@@ -5,7 +5,10 @@ from config import Config
 
 class OpenWebUIClient:
     def __init__(self):
-        self.base_url = Config.BASE_URL().rstrip("/")
+        url = Config.BASE_URL().rstrip("/")
+        if not url.startswith(("http://", "https://")):
+            url = f"http://{url}"
+        self.base_url = url
         self.headers = {
             "Authorization": f"Bearer {Config.API_KEY()}"
         }

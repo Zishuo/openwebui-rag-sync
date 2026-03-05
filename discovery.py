@@ -1,32 +1,75 @@
 import pathlib
 import shutil
+import json
 
-def discover_files(source_path, keyword=None, target_dir="staged-docs"):
-    target = pathlib.Path(target_dir).expanduser()
-    target.mkdir(exist_ok=True, parents=True)
-    
-    found_files = []
+def discover_files(source_path, keyword=None, target_dir=None):
+    """
+    Scans source_path for documents. 
+    If target_dir is provided, copies files there and updates sync_manifest.json.
+    Returns a list of dicts: {'original': Path, 'flattened': str, 'staged': Path or None}
+    """
     source = pathlib.Path(source_path).expanduser().resolve()
+    target = pathlib.Path(target_dir).expanduser().resolve() if target_dir else None
     
-    # Supported extensions
+    manifest = {}
+    if target:
+        target.mkdir(exist_ok=True, parents=True)
+        manifest_path = target / "sync_manifest.json"
+        if manifest_path.exists():
+            try:
+                with open(manifest_path, "r") as f:
+                    manifest = json.load(f)
+            except Exception as e:
+                print(f"Warning: Failed to load manifest: {e}")
+
+    results = []
     extensions = {'.doc', '.docx', '.pdf', '.md'}
     
+    # 1. Discovery
     for path in source.rglob('*'):
         if path.is_file() and path.suffix.lower() in extensions:
             if not keyword or keyword.lower() in path.name.lower():
-                # Calculate relative path from source to current file
-                # Use resolve() on path to ensure it's absolute before relative_to
                 try:
                     rel_path = path.resolve().relative_to(source)
-                    # Prepend source directory name and flatten parts by joining with underscores
                     path_parts = [source.name] + list(rel_path.parts)
                     flattened_name = "_".join(path_parts)
-                except ValueError:
-                    # Fallback to name if path is not relative to source (unlikely with rglob)
-                    flattened_name = path.name
                     
-                dest = target / flattened_name
-                shutil.copy2(path, dest)
-                found_files.append(dest)
+                    staged_path = None
+                    if target:
+                        staged_path = target / flattened_name
+                        shutil.copy2(path, staged_path)
+                        # Update manifest entry
+                        if flattened_name not in manifest or not isinstance(manifest[flattened_name], dict):
+                            manifest[flattened_name] = {}
+                        manifest[flattened_name]["original_path"] = str(path.resolve())
+                    
+                    results.append({
+                        "original": path.resolve(),
+                        "flattened": flattened_name,
+                        "staged": staged_path
+                    })
+                except ValueError:
+                    continue
+    
+    # 2. Deletion Check (only if staging)
+    if target:
+        to_delete = []
+        for flattened_name, entry in manifest.items():
+            original_path_str = entry["original_path"] if isinstance(entry, dict) else entry
+            original_path = pathlib.Path(original_path_str)
             
-    return found_files
+            if str(original_path).startswith(str(source)):
+                if not original_path.exists():
+                    staged_file = target / flattened_name
+                    if staged_file.exists():
+                        print(f"Source deleted: {original_path_str}. Removing staged file: {flattened_name}")
+                        staged_file.unlink()
+                    to_delete.append(flattened_name)
+        
+        for key in to_delete:
+            del manifest[key]
+            
+        with open(target / "sync_manifest.json", "w") as f:
+            json.dump(manifest, f, indent=2)
+            
+    return results

@@ -15,10 +15,10 @@ def test_versioning():
         test_file.write_text("content")
         
         # Verify it's detected
-        changed = get_changed_files(str(test_dir))
-        assert any("new_file.md" in f for f in changed)
+        updated, deleted = get_changed_files(str(test_dir))
+        assert any("new_file.md" in f for f in updated)
         print("Initial detection passed!")
-        
+
         # Commit it
         try:
             subprocess.run(["git", "add", "."], cwd=str(test_dir), check=True)
@@ -30,14 +30,24 @@ def test_versioning():
             print(f"STDOUT: {e.stdout}")
             print(f"STDERR: {e.stderr}")
             raise e
-        
+
         # Modify it
         test_file.write_text("modified content")
-        
+
         # Verify it's detected
-        changed = get_changed_files(str(test_dir))
-        assert any("new_file.md" in f for f in changed)
+        updated, deleted = get_changed_files(str(test_dir))
+        assert any("new_file.md" in f for f in updated)
         print("Modification detection passed!")
+
+        # Test Deletion
+        subprocess.run(["git", "add", "."], cwd=str(test_dir), check=True)
+        subprocess.run(["git", "commit", "-m", "test: commit modification"], cwd=str(test_dir), check=True)
+        test_file.unlink()
+
+        updated, deleted = get_changed_files(str(test_dir))
+        assert any("new_file.md" in f for f in deleted)
+        print("Deletion detection passed!")
+
         
         # Unstage for cleanup
         subprocess.run(["git", "restore", "--staged", "."], cwd=str(test_dir), check=True)
