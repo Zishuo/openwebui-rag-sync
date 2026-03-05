@@ -35,8 +35,8 @@ def get_changed_files(target_dir="staged-docs"):
         status = line[:2]
         file_path = line[3:].strip().strip('"') # Strip quotes if they exist
         
-        # Explicitly ignore manifest
-        if file_path == "sync_manifest.json":
+        # Explicitly ignore internal tracking files
+        if file_path in ["sync_manifest.json", "sync_failures.log"]:
             continue
             
         if status.startswith('D') or status.endswith('D'):
