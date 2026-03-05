@@ -56,6 +56,7 @@ The script is compositional. Providing a specific parameter "opts-in" to that ph
 - `-e`, `--export-dir`: Directory for Markdown exports. Triggers **Export**.
 - `--kb-name` / `--kb-id`: Target Knowledge Base. Required for any OpenWebUI interaction.
 - `--keyword`: Optional string to filter filenames during discovery.
+- `--force`: Force upload all files, ignoring Git change tracking.
 - `--export-git`: Enable Git version control for the export directory (default: off).
 - `--insecure`: Skip SSL certificate verification (useful for self-signed certificates).
 

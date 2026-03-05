@@ -19,6 +19,7 @@ def main():
     parser.add_argument("--kb-id", help="Knowledge Base ID")
     parser.add_argument("--kb-name", help="Knowledge Base Name")
     parser.add_argument("--export-git", action="store_true", help="Enable Git version control for the export directory")
+    parser.add_argument("--force", action="store_true", help="Force upload all files, ignoring Git tracking")
     parser.add_argument("--insecure", action="store_true", help="Skip SSL certificate verification")
     
     args = parser.parse_args()
@@ -96,22 +97,30 @@ def main():
         upload_queue = []
         
         if staged_dir:
-            log("VERSIONING", f"Checking for changes in {staged_path}...")
-            updated_rel, deleted_rel = get_changed_files(staged_dir)
-            
-            if deleted_rel:
-                log("CLEANUP", f"Handling {len(deleted_rel)} deleted file(s)...")
-                for rel in deleted_rel:
-                    if export_path:
-                        export_filename = rel if rel.lower().endswith(".md") else f"{rel}.md"
-                        if (export_path / export_filename).exists():
-                            log("CLEANUP", f"Deleting local export: {export_filename}")
-                            (export_path / export_filename).unlink()
-                    subprocess.run(["git", "rm", rel], cwd=staged_path, check=True, capture_output=True)
+            if args.force:
+                log("VERSIONING", f"Forcing upload for all files in {staged_path}...")
+                for path in staged_path.rglob('*'):
+                    if path.is_file() and not path.name.startswith(".git") and path.name not in ["sync_manifest.json", "sync_failures.log"]:
+                        rel = str(path.relative_to(staged_path))
+                        upload_queue.append({"path": path, "flattened": path.name, "rel_path": rel, "context": staged_path})
+            else:
+                log("VERSIONING", f"Checking for changes in {staged_path}...")
+                updated_rel, deleted_rel = get_changed_files(staged_dir)
+                
+                if deleted_rel:
+                    log("CLEANUP", f"Handling {len(deleted_rel)} deleted file(s)...")
+                    for rel in deleted_rel:
+                        if export_path:
+                            export_filename = rel if rel.lower().endswith(".md") else f"{rel}.md"
+                            if (export_path / export_filename).exists():
+                                log("CLEANUP", f"Deleting local export: {export_filename}")
+                                (export_path / export_filename).unlink()
+                        subprocess.run(["git", "rm", rel], cwd=staged_path, check=True, capture_output=True)
 
-            for rel in updated_rel:
-                upload_queue.append({"path": staged_path / rel, "flattened": pathlib.Path(rel).name, "rel_path": rel, "context": staged_path})
+                for rel in updated_rel:
+                    upload_queue.append({"path": staged_path / rel, "flattened": pathlib.Path(rel).name, "rel_path": rel, "context": staged_path})
         elif discovered_results:
+            log("VERSIONING", "Adding discovered files to upload queue...")
             for item in discovered_results:
                 upload_queue.append({"path": item["original"], "flattened": item["flattened"], "rel_path": None, "context": None})
 
