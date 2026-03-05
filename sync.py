@@ -148,6 +148,10 @@ def main():
                         
                         print(f"Uploading {f_flattened}...")
                         file_id = client.upload_file(str(f_path))
+                        print(f"Uploaded. File ID: {file_id}")
+
+                        print("Waiting for processing (embedding)...")
+                        client.wait_for_processing(file_id)
                         
                         print(f"Linking to KB {kb_id}...")
                         result = client.add_to_kb(file_id, kb_id)
