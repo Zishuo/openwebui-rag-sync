@@ -57,6 +57,7 @@ The script is compositional. Providing a specific parameter "opts-in" to that ph
 - `--kb-name` / `--kb-id`: Target Knowledge Base. Required for any OpenWebUI interaction.
 - `--keyword`: Optional string to filter filenames during discovery.
 - `--digest-git`: Enable Git version control for the digest directory (default: off).
+- `--insecure`: Skip SSL certificate verification (useful for self-signed certificates).
 
 ## 📜 Development Conventions
 - **Flattened Paths:** Files are staged using underscores (e.g., `src_subdir_file.md`) to prevent collisions.

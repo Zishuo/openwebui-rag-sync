@@ -1,7 +1,14 @@
 import requests
 import time
 import pathlib
+import json
+import datetime
 from config import Config
+
+# Suppress insecure request warnings if SSL verification is disabled
+import urllib3
+if not Config.VERIFY_SSL():
+    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 class OpenWebUIClient:
     def __init__(self):
@@ -12,6 +19,7 @@ class OpenWebUIClient:
         self.headers = {
             "Authorization": f"Bearer {Config.API_KEY()}"
         }
+        self.verify = Config.VERIFY_SSL()
 
     def upload_file(self, file_path):
         """Uploads a file and returns the file ID."""
@@ -19,7 +27,7 @@ class OpenWebUIClient:
         path = pathlib.Path(file_path).expanduser()
         with open(path, "rb") as f:
             files = {"file": (path.name, f)}
-            response = requests.post(url, headers=self.headers, files=files)
+            response = requests.post(url, headers=self.headers, files=files, verify=self.verify)
             try:
                 response.raise_for_status()
             except requests.exceptions.HTTPError as e:
@@ -33,23 +41,52 @@ class OpenWebUIClient:
         payload = {
             "name": name,
             "description": description,
-            "access_control": None # Default to private/inherited
+            "access_control": None 
         }
-        response = requests.post(url, headers=self.headers, json=payload)
+        response = requests.post(url, headers=self.headers, json=payload, verify=self.verify)
         response.raise_for_status()
         return response.json().get("id")
 
     def get_file_status(self, file_id):
         """Returns the processing status of a file."""
         url = f"{self.base_url}/api/v1/files/{file_id}/process/status"
-        response = requests.get(url, headers=self.headers)
+        response = requests.get(url, headers=self.headers, verify=self.verify)
         response.raise_for_status()
         return response.json()
+
+    def get_content(self, file_id):
+        """Retrieves the parsed Markdown content of a file."""
+        url = f"{self.base_url}/api/v1/files/{file_id}"
+        response = requests.get(url, headers=self.headers, verify=self.verify)
+        try:
+            response.raise_for_status()
+            data = response.json()
+            content = data.get("data", {}).get("content")
+            if content:
+                return content
+        except Exception:
+            pass
+
+        try:
+            url = f"{self.base_url}/api/v1/files/{file_id}/content"
+            response = requests.get(url, headers=self.headers, verify=self.verify)
+            response.raise_for_status()
+            return response.text
+        except requests.exceptions.HTTPError:
+            url = f"{self.base_url}/api/v1/files/{file_id}"
+            response = requests.get(url, headers=self.headers, verify=self.verify)
+            try:
+                response.raise_for_status()
+            except requests.exceptions.HTTPError as e:
+                print(f"Content retrieval failed: {response.status_code} - {response.text}")
+                raise e
+            data = response.json()
+            return data.get("meta", {}).get("content", "")
 
     def list_all_files(self):
         """Returns a list of all files uploaded to the system."""
         url = f"{self.base_url}/api/v1/files/"
-        response = requests.get(url, headers=self.headers)
+        response = requests.get(url, headers=self.headers, verify=self.verify)
         response.raise_for_status()
         data = response.json()
         return data.get("items", []) if isinstance(data, dict) else data
@@ -64,79 +101,36 @@ class OpenWebUIClient:
                 kb_files.append(f)
         return kb_files
 
-    def get_content(self, file_id):
-        """Retrieves the parsed Markdown content of a file."""
-        # Check if we already have the file data with content (optional optimization)
-        # But for robustness, we'll fetch the latest file details
-        url = f"{self.base_url}/api/v1/files/{file_id}"
-        response = requests.get(url, headers=self.headers)
-        try:
-            response.raise_for_status()
-            data = response.json()
-            # In many versions, content is directly in data['data']['content']
-            content = data.get("data", {}).get("content")
-            if content:
-                return content
-        except Exception:
-            pass
-
-        # Fallback to specific content endpoint
-        try:
-            url = f"{self.base_url}/api/v1/files/{file_id}/content"
-            response = requests.get(url, headers=self.headers)
-            response.raise_for_status()
-            return response.text
-        except requests.exceptions.HTTPError:
-            # Final fallback to meta
-            url = f"{self.base_url}/api/v1/files/{file_id}"
-            response = requests.get(url, headers=self.headers)
-            try:
-                response.raise_for_status()
-            except requests.exceptions.HTTPError as e:
-                print(f"Content retrieval failed: {response.status_code} - {response.text}")
-                raise e
-            data = response.json()
-            return data.get("meta", {}).get("content", "")
-
     def list_knowledge_bases(self):
         """Returns a list of all knowledge bases."""
         url = f"{self.base_url}/api/v1/knowledge/"
-        response = requests.get(url, headers=self.headers)
+        response = requests.get(url, headers=self.headers, verify=self.verify)
         response.raise_for_status()
         data = response.json()
         
-        # Handle different response formats
         if isinstance(data, list):
             return data
         if isinstance(data, dict):
-            # Try common keys
             for key in ["data", "knowledge", "collections", "items"]:
                 if key in data and isinstance(data[key], list):
                     return data[key]
-            # If it's a dict but no list key found, return the dict in a list if it looks like a KB
             if "id" in data and "name" in data:
                 return [data]
-        
-        print(f"Warning: Unexpected KB list format: {type(data)}")
         return []
 
     def get_kb_id_by_name(self, name):
         """Resolves a knowledge base name to its ID."""
         kbs = self.list_knowledge_bases()
         for kb in kbs:
-            # Ensure kb is a dictionary before calling .get()
             if isinstance(kb, dict):
                 if kb.get("name") == name:
                     return kb.get("id")
-            elif isinstance(kb, str) and kb == name:
-                # Fallback if list is just names (unlikely but safe)
-                print(f"Warning: Found string '{kb}' in KB list instead of object.")
         return None
 
     def delete_kb(self, kb_id):
         """Deletes a knowledge base."""
         url = f"{self.base_url}/api/v1/knowledge/{kb_id}/delete"
-        response = requests.delete(url, headers=self.headers)
+        response = requests.delete(url, headers=self.headers, verify=self.verify)
         response.raise_for_status()
         return response.json()
 
@@ -144,7 +138,7 @@ class OpenWebUIClient:
         """Links a file to a specific Knowledge Base."""
         url = f"{self.base_url}/api/v1/knowledge/{kb_id}/file/add"
         payload = {"file_id": file_id}
-        response = requests.post(url, headers=self.headers, json=payload)
+        response = requests.post(url, headers=self.headers, json=payload, verify=self.verify)
         
         if response.status_code == 400 and "Duplicate content" in response.text:
             return {"status": "duplicate", "message": "Content already exists in Knowledge Base."}
@@ -159,7 +153,7 @@ class OpenWebUIClient:
     def get_kb_details(self, kb_id):
         """Returns details of a knowledge base including file list."""
         url = f"{self.base_url}/api/v1/knowledge/{kb_id}"
-        response = requests.get(url, headers=self.headers)
+        response = requests.get(url, headers=self.headers, verify=self.verify)
         response.raise_for_status()
         return response.json()
 

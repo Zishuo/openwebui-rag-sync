@@ -18,8 +18,12 @@ def main():
     parser.add_argument("--kb-id", help="Knowledge Base ID")
     parser.add_argument("--kb-name", help="Knowledge Base Name")
     parser.add_argument("--digest-git", action="store_true", help="Enable Git version control for the digest directory")
+    parser.add_argument("--insecure", action="store_true", help="Skip SSL certificate verification")
     
     args = parser.parse_args()
+
+    if args.insecure:
+        os.environ["OPENWEBUI_VERIFY_SSL"] = "false"
 
     # Mode Determination
     if args.path:

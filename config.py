@@ -13,6 +13,12 @@ class Config:
         return os.getenv("OPENWEBUI_BASE_URL")
 
     @classmethod
+    def VERIFY_SSL(cls):
+        # Default to True, allow "false" or "0" to disable
+        val = os.getenv("OPENWEBUI_VERIFY_SSL", "true").lower()
+        return val not in ("false", "0")
+
+    @classmethod
     def validate(cls):
         missing = [k for k, v in {
             "OPENWEBUI_API_KEY": cls.API_KEY(),
