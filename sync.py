@@ -147,10 +147,15 @@ def main():
                     rel_file_path = item["rel_path"]
                     try:
                         # Validation
-                        if f_path.stat().st_size == 0: raise ValueError("File is empty.")
+                        if f_path.stat().st_size == 0:
+                            log("VERSIONING", f"Skipping empty file: {f_flattened}")
+                            continue
+                        
                         if f_path.suffix.lower() == '.md':
                             with open(f_path, 'r', errors='ignore') as f:
-                                if not f.read().strip(): raise ValueError("Empty Markdown.")
+                                if not f.read().strip():
+                                    log("VERSIONING", f"Skipping empty Markdown: {f_flattened}")
+                                    continue
 
                         if item["context"] and rel_file_path:
                             subprocess.run(["git", "add", rel_file_path], cwd=item["context"], check=True)

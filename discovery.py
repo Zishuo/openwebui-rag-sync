@@ -133,10 +133,19 @@ def discover_files(source_path, keyword=None, target_dir=None):
                 orig_path = pathlib.Path(entry["original_path"])
                 # Only check deletions for files within the current scan path
                 if str(orig_path).startswith(str(source)):
-                    if not orig_path.exists():
+                    is_gone = not orig_path.exists()
+                    is_empty = False
+                    if not is_gone:
+                        try:
+                            is_empty = orig_path.stat().st_size == 0
+                        except Exception:
+                            is_gone = True
+                            
+                    if is_gone or is_empty:
+                        reason = "deleted" if is_gone else "empty"
                         staged_file = target / fname
                         if staged_file.exists():
-                            print(f"Source deleted: {orig_path}. Removing staged file: {fname}")
+                            print(f"Source {reason}: {orig_path}. Removing staged file: {fname}")
                             staged_file.unlink()
                         to_delete.append(fname)
             
