@@ -77,6 +77,10 @@ def discover_files(source_path, keyword=None, target_dir=None):
         if path.is_file() and path.suffix.lower() in extensions:
             if not keyword or keyword.lower() in path.name.lower():
                 try:
+                    # Skip empty files
+                    if path.stat().st_size == 0:
+                        continue
+                        
                     abs_file_path = path.resolve()
                     
                     if repo_root:
