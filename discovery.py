@@ -2,6 +2,7 @@ import pathlib
 import shutil
 import json
 import subprocess
+from utils import log
 
 def get_repo_info(path):
     """Finds the root, type, and remote URL of a git or svn repository."""
@@ -55,7 +56,7 @@ def discover_files(source_path, keyword=None, target_dir=None):
                     data = json.load(f)
                     # Migration logic from flat to nested
                     if "repositories" not in data:
-                        print("Migrating flat manifest to repository-grouped format...")
+                        log("CONFIG", "Migrating flat manifest to repository-grouped format...")
                         for fname, entry in data.items():
                             if isinstance(entry, dict) and "original_path" in entry:
                                 orig = pathlib.Path(entry["original_path"])
@@ -67,7 +68,7 @@ def discover_files(source_path, keyword=None, target_dir=None):
                     else:
                         manifest = data
             except Exception as e:
-                print(f"Warning: Failed to load manifest: {e}")
+                log("ERROR", f"Failed to load manifest: {e}")
 
     results = []
     extensions = {'.doc', '.docx', '.pdf', '.md'}
@@ -145,7 +146,7 @@ def discover_files(source_path, keyword=None, target_dir=None):
                         reason = "deleted" if is_gone else "empty"
                         staged_file = target / fname
                         if staged_file.exists():
-                            print(f"Source {reason}: {orig_path}. Removing staged file: {fname}")
+                            log("CLEANUP", f"Source {reason}: {orig_path.name}. Removing staged file: {fname}")
                             staged_file.unlink()
                         to_delete.append(fname)
             
