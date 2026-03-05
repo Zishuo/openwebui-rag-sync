@@ -134,6 +134,15 @@ def main():
                 for item in upload_queue:
                     f_path, f_flattened = item["path"], item["flattened"]
                     try:
+                        # 1. Validate file content before upload
+                        if f_path.stat().st_size == 0:
+                            raise ValueError("File is empty (0 bytes).")
+                        
+                        if f_path.suffix.lower() == '.md':
+                            with open(f_path, 'r', errors='ignore') as f:
+                                if not f.read().strip():
+                                    raise ValueError("Markdown file is empty or contains only whitespace.")
+
                         if item["context"] and item["rel_path"]:
                             subprocess.run(["git", "add", item["rel_path"]], cwd=item["context"], check=True)
                         
@@ -175,7 +184,7 @@ def main():
                                     with open(manifest_path, "w") as f: json.dump(manifest, f, indent=2)
 
             # Commit Tracking Repo
-            if staged_path and (success_count > 0 or failed_files or deleted_rel):
+            if staged_path and (success_count > 0 or failed_files or (deleted_rel if 'deleted_rel' in locals() else False)):
                 print("\nCommitting changes to tracking repository...")
                 subprocess.run(["git", "add", "sync_manifest.json", "sync_failures.log"], cwd=staged_path, capture_output=True)
                 staged = subprocess.run(["git", "diff", "--cached", "--name-only"], cwd=staged_path, capture_output=True, text=True)
